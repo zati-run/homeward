@@ -97,4 +97,4 @@ Finalize Protobuf messages, identity/enrollment mechanism, default limits, recei
 - [gRPC bidirectional streams and ordering](https://grpc.io/docs/what-is-grpc/core-concepts/)
 - [gRPC flow control](https://grpc.io/docs/guides/flow-control/)
 - [gRPC keepalive and broken streams](https://grpc.io/docs/guides/keepalive/)
-- [Zamu extension proposal](001-zamu-extensions.md)
+- [Zamu extension proposal](https://github.com/sirerun/zamu/pull/5)
