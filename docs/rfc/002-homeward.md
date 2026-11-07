@@ -2,6 +2,7 @@
 
 - Status: Draft; architecture direction confirmed, protocol details proposed.
 - Date: 2026-11-03
+- Revised: 2026-11-07
 - Repository: `zati-run/homeward`
 - Owner direction: Independently usable home dial-in component. The cloud exposes REST/WebSocket and other supported APIs, the home agent connects to equivalent local services, and gRPC is the internal cloud-to-home transport.
 
@@ -44,11 +45,15 @@ Preserve allowed methods, paths, query strings, end-to-end headers, HTTP status 
 
 Enforce request/header/body limits, deadlines and response backpressure before buffering. Support incremental responses such as SSE through streaming HTTP bodies. Specify trailers and informational response support in the compatibility matrix before claiming transparent HTTP support. Map transport failure to a gateway error only before response headers commit; after commit terminate the stream visibly rather than inventing a successful HTTP response.
 
+Authorization and forwarding must use the same validated request target. Reject ambiguous encodings, dot-segment traversal and conflicting framing rather than authorizing one path and forwarding another. Strip headers named by Connection as well as known hop-by-hop headers; reject invalid framing before dispatch. Replace untrusted forwarding/identity headers with gateway-derived values under explicit service policy. Reject CONNECT and unsupported upgrades; WebSocket uses its dedicated adapter.
+
 Local redirects are returned to callers subject to configured rewriting policy; the agent must not follow redirects into unapproved destinations. Service configuration must also constrain DNS resolution and local routing where needed. Proxy access does not confer broader LAN access.
 
 ## WebSocket bridge
 
 Terminate the public WebSocket at the gateway and open the configured local WebSocket at home. Carry text/binary message type, payload and ordering through the internal exchange. Preserve negotiated subprotocols only from an explicit supported intersection. Negotiate compression independently on each leg; do not forward compressed wire frames blindly.
+
+Authenticate and authorize before opening either leg. For browser callers, enforce an explicit Origin policy and CSRF protection where ambient credentials are accepted; Origin alone is not authentication. Complete the local handshake before committing the public upgrade, within a bounded handshake deadline. Offer only caller-requested, configured subprotocols locally and return the locally selected protocol publicly; reject an incompatible selection. Local handshake rejection produces a sanitized HTTP failure before public upgrade. If the caller leaves during setup, close any local socket opened by the race.
 
 Bound message size and queued bytes. Define fragmentation/reassembly limits explicitly. Handle ping/pong per terminated connection and propagate application close code/reason where valid. Transport failure closes both legs with a visible failure; reconnect creates a new session, not a transparent replay of the old one. Caller disconnect, local close, deadline and agent cancellation release both sockets and exchange resources.
 
@@ -67,6 +72,10 @@ Use bounded exponential reconnect backoff with jitter. Negotiate heartbeat/keepa
 Assign a stable operation identity before dispatch. Track offered, accepted, dispatched, completed, failed and outcome-unknown states. Disconnection after local dispatch may leave the outcome unknown. Never automatically retry a mutating request merely because its response was lost, including requests nominally using an idempotent HTTP verb when local semantics are unverified.
 
 The gateway owns its operation record; the agent records local dispatch and completion receipts with bounded retention and appropriate durability. These are transport/effect receipts, not duplicate domain jobs. Define retention, reconciliation and expiration behavior before enabling retry. If receipts cannot resolve the result, return outcome-unknown and require service-specific reconciliation. Do not promise exactly-once effects.
+
+Before any bytes can reach the local service, durably record dispatch intent bound to the operation ID, authenticated home, service, method and immutable request identity. If that write fails, do not dispatch. A crash after intent but before a completion receipt is conservatively outcome-unknown, even if dispatch might not have happened. A receipt cannot be atomic with an arbitrary service's effect. A complete transport response is not proof that a service's asynchronous job finished.
+
+Duplicate operation IDs must never initiate a fresh dispatch: reconcile the existing receipt, or reject a conflicting request identity. Reconciliation authenticates the original scope even across connection generations and must not itself dispatch. Missing or expired receipts do not prove non-execution and cannot authorize replay. Define a bounded replay horizon and durable rejection of expired identities before enabling resubmission. Report the operation ID and uncertainty to authorized callers through a documented status contract, including after an HTTP response has already committed.
 
 Read retries require an explicit service policy. Idempotent effect retries require a service-supported idempotency key and reconciliation contract. Homeward cannot manufacture idempotency for arbitrary local APIs. Streaming sessions and audio are not replayed automatically after reconnect.
 
@@ -87,6 +96,9 @@ Homeward owns only connection and exchange lifecycle. Existing services retain r
 7. Rotate credentials and verify old credentials cannot establish new sessions; document active-session revocation behavior.
 8. Run through the intended HTTP/2 ingress and proxy idle timeouts. Record revisions, environment, commands and results; local fixtures do not establish deployed acceptance.
 9. Run the examples without Zati or Zamu installed.
+10. Reject encoded path-policy bypasses, conflicting HTTP framing, forged forwarding headers, unsupported upgrades and disallowed browser origins before local dispatch.
+11. Verify local WebSocket handshake rejection, subprotocol mismatch and caller departure during setup never leave a successful public upgrade or orphaned local socket.
+12. Inject crashes before and after durable dispatch intent and completion recording. Reject journal-write failure, conflicting duplicate identities and replay after receipt expiry; demonstrate authorized reconciliation across generations without redispatch.
 
 ## Open details
 
@@ -98,3 +110,6 @@ Finalize Protobuf messages, identity/enrollment mechanism, default limits, recei
 - [gRPC flow control](https://grpc.io/docs/guides/flow-control/)
 - [gRPC keepalive and broken streams](https://grpc.io/docs/guides/keepalive/)
 - [Zamu extension proposal](https://github.com/sirerun/zamu/pull/5)
+
+- [HTTP semantics and intermediary requirements (RFC 9110)](https://www.rfc-editor.org/rfc/rfc9110.html)
+- [WebSocket handshake and origin requirements (RFC 6455)](https://www.rfc-editor.org/rfc/rfc6455.html)
